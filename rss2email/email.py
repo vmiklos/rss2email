@@ -59,6 +59,37 @@ def guess_encoding(string, encodings=('US-ASCII', 'UTF-8')):
             return encoding
     raise _error.NoValidEncodingError(string=string, encodings=encodings)
 
+def address_header(address, config=None, section='DEFAULT'):
+    """Convert a Unicode address to an email header
+
+    Only the real name part of sender and recipient addresses may
+    contain non-ASCII characters, the address part must be pure ASCII.
+
+    >>> address_header('John <jdoe@a.com>')
+    'John <jdoe@a.com>'
+    >>> address_header('Ζεύς <z@olympus.org>')
+    '=?utf-8?b?zpbOtc+Nz4I=?= <z@olympus.org>'
+    """
+    if config is None:
+        config = _config.CONFIG
+    if section not in config.sections():
+        section = 'DEFAULT'
+    encodings = [
+        x.strip() for x in config.get(section, 'encodings').split(',')]
+
+    # Split real name (which is optional) and email address parts
+    name,addr = _parseaddr(address)
+    encoding = guess_encoding(name, encodings)
+
+    # We must always pass Unicode strings to Header, otherwise it will
+    # use RFC 2047 encoding even on plain ASCII strings.
+    name = str(_Header(name, encoding).encode())
+
+    # Make sure email addresses only contains ASCII characters
+    addr.encode('ascii')
+
+    return _formataddr((name, addr))
+
 def get_message(sender, recipient, subject, body, content_type,
                 extra_headers=None, config=None, section='DEFAULT'):
     """Generate a `Message` instance.
@@ -98,28 +129,13 @@ def get_message(sender, recipient, subject, body, content_type,
     encodings = [
         x.strip() for x in config.get(section, 'encodings').split(',')]
 
-    # Split real name (which is optional) and email address parts
-    sender_name,sender_addr = _parseaddr(sender)
-    recipient_name,recipient_addr = _parseaddr(recipient)
-
-    sender_encoding = guess_encoding(sender_name, encodings)
-    recipient_encoding = guess_encoding(recipient_name, encodings)
     subject_encoding = guess_encoding(subject, encodings)
     body_encoding = guess_encoding(body, encodings)
 
-    # We must always pass Unicode strings to Header, otherwise it will
-    # use RFC 2047 encoding even on plain ASCII strings.
-    sender_name = str(_Header(sender_name, sender_encoding).encode())
-    recipient_name = str(_Header(recipient_name, recipient_encoding).encode())
-
-    # Make sure email addresses do not contain non-ASCII characters
-    sender_addr.encode('ascii')
-    recipient_addr.encode('ascii')
-
     # Create the message ('plain' stands for Content-Type: text/plain)
     message = _MIMEText(body, content_type, body_encoding)
-    message['From'] = _formataddr((sender_name, sender_addr))
-    message['To'] = _formataddr((recipient_name, recipient_addr))
+    message['From'] = address_header(sender)
+    message['To'] = address_header(recipient)
     message['Subject'] = _Header(subject, subject_encoding)
     if config.getboolean(section, 'use-8bit'):
         del message['Content-Transfer-Encoding']
