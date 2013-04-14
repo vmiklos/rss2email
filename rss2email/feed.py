@@ -30,6 +30,7 @@
 import collections as _collections
 from email.utils import formataddr as _formataddr
 import hashlib as _hashlib
+import html as _html
 import html.parser as _html_parser
 import re as _re
 import socket as _socket
@@ -37,7 +38,6 @@ import time as _time
 import urllib.error as _urllib_error
 import urllib.request as _urllib_request
 import xml.sax as _sax
-import xml.sax.saxutils as _saxutils
 
 import feedparser as _feedparser
 import html2text as _html2text
@@ -688,7 +688,7 @@ class Feed (object):
             if content['type'] in ('text/html', 'application/xhtml+xml'):
                 lines.append(content['value'].strip())
             else:
-                lines.append(_saxutils.escape(content['value'].strip()))
+                lines.append(_html.escape(content['value'].strip()))
             lines.append('</div>')
             lines.extend([
                     '<div class="footer">'
