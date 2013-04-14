@@ -28,6 +28,8 @@
 """
 
 import collections as _collections
+from email.mime.multipart import MIMEMultipart as _MIMEMultipart
+from email.mime.nonmultipart import MIMENonMultipart as _MIMENonMultipart
 from email.utils import formataddr as _formataddr
 import hashlib as _hashlib
 import html as _html
@@ -36,6 +38,7 @@ import re as _re
 import socket as _socket
 import time as _time
 import urllib.error as _urllib_error
+import urllib.parse as _urllib_parse
 import urllib.request as _urllib_request
 import xml.sax as _sax
 
@@ -163,6 +166,7 @@ class Feed (object):
         'active',
         'date_header',
         'trust_guid',
+        'include_references',
         'html_mail',
         'use_css',
         'unicode_snob',
@@ -429,17 +433,22 @@ class Feed (object):
 
         content = self._get_entry_content(entry)
         try:
-            content = self._process_entry_content(
+            parts = self._process_entry_content(
                 entry=entry, content=content, subject=subject)
         except _error.ProcessingError as e:
             e.parsed = parsed
             raise
-        message = _email.get_message(
+        if len(parts) == 1:
+            message = parts[0]
+        else:
+            _MIMEMultipart()
+            for part in parts:
+                message.attach(part)
+        _email.set_headers(
+            message=message,
             sender=sender,
             recipient=self.to,
             subject=subject,
-            body=content['value'],
-            content_type=content['type'].split('/', 1)[1],
             extra_headers=extra_headers,
             config=self.config,
             section=self.section)
@@ -663,8 +672,21 @@ class Feed (object):
         return {'type': 'text/plain', 'value': ''}
 
     def _process_entry_content(self, entry, content, subject):
-        "Convert entry content to the requested format."
+        """Convert entry content to the requested format
+
+        Returns a list of parts, with a `text/*` part first containing
+        the content.  If `self.include_references` is True, the
+        referenced parts are also included as attachments.
+        """
+        parts = []
         link = self._get_entry_link(entry)
+        if content['type'] in ('text/html', 'application/xhtml+xml'):
+            html_content,new_parts = self._process_entry_content_html(
+                entry=entry, content=content, subject=subject,
+                html=content['value'].strip())
+            parts.extend(new_parts)
+        else:
+            html_content = _html.escape(content['value'].strip())
         if self.html_mail:
             lines = [
                 '<!DOCTYPE html>',
@@ -695,22 +717,30 @@ class Feed (object):
                     '<p>URL: <a href="{0}">{0}</a></p>'.format(link),
                     ])
             for enclosure in getattr(entry, 'enclosures', []):
+                part = None
                 if getattr(enclosure, 'url', None):
+                    ref_link,part = self._get_reference(url=enclosure.url)
                     lines.append(
                         '<p>Enclosure: <a href="{0}">{0}</a></p>'.format(
-                            enclosure.url))
+                            ref_link))
                 if getattr(enclosure, 'src', None):
+                    ref_link,part = self._get_reference(url=enclosure.src)
                     lines.append(
                         '<p>Enclosure: <a href="{0}">{0}</a></p>'.format(
-                            enclosure.src))
-                    lines.append(
-                        '<p><img src="{}" /></p>'.format(enclosure.src))
+                            ref_link))
+                    lines.append('<p><img src="{}" /></p>'.format(ref_link))
+                if part:
+                    parts.append(part)
             for elink in getattr(entry, 'links', []):
+                part = None
                 if elink.get('rel', None) == 'via':
                     url = elink['href']
+                    ref_link,part = self._get_reference(url=url)
                     title = elink.get('title', url)
                     lines.append('<p>Via <a href="{}">{}</a></p>'.format(
-                            url, title))
+                            ref_link, title))
+                if part:
+                    parts.append(part)
             lines.extend([
                     '</div>',  # /footer
                     '</div>',  # /entry
@@ -719,7 +749,6 @@ class Feed (object):
                     ''])
             content['type'] = 'text/html'
             content['value'] = '\n'.join(lines)
-            return content
         else:  # not self.html_mail
             if content['type'] in ('text/html', 'application/xhtml+xml'):
                 try:
@@ -731,18 +760,64 @@ class Feed (object):
             lines.append('')
             lines.append('URL: {}'.format(link))
             for enclosure in getattr(entry, 'enclosures', []):
-                if getattr(enclosure, 'url', None):
-                    lines.append('Enclosure: {}'.format(enclosure.url))
-                if getattr(enclosure, 'src', None):
-                    lines.append('Enclosure: {}'.format(enclosure.src))
+                for url in [
+                        getattr(enclosure, 'url', None),
+                        getattr(enclosure, 'src', None),
+                        ]:
+                    ref_link,part = self._get_reference(url=url)
+                    lines.append('Enclosure: {}'.format(ref_link))
+                    if part:
+                        parts.append(part)
             for elink in getattr(entry, 'links', []):
                 if elink.get('rel', None) == 'via':
                     url = elink['href']
+                    ref_link,part = self._get_reference(url=url)
                     title = elink.get('title', url)
-                    lines.append('Via: {} {}'.format(title, url))
+                    lines.append('Via: {} {}'.format(title, ref_link))
+                    if part:
+                        parts.append(part)
             content['type'] = 'text/plain'
             content['value'] = '\n'.join(lines)
-            return content
+        content_part = _email.get_mimetext(
+            body=content['value'],
+            content_type=content['type'].split('/', 1)[1],
+            config=self.config,
+            section=self.section)
+        parts.insert(0, content_part)
+        return parts
+
+    def _process_entry_content_html(self, entry, content, subject, html):
+        """Manipulate the entry HTML
+
+        For example, replace links to images with cid: links if
+        `self.include_references` is True.
+
+        Returns a the new HTML and a list of parts (which may be empty).
+        """
+        return (html, [])  # TODO
+
+    def _get_reference(self, url):
+        """Get references for cid: links.
+
+        RFC 2392 [1] provides linking between message parts based on
+        Content-IDs via `cid:...` URLs.  If `self.include_references`
+        is True, download the object referenced by `url` and return a
+        tuple containing a `cid:...` URL and the MIME part containing
+        the referenced data.  Otherwise, return `(url, None)`.
+
+        [1]: http://tools.ietf.org/html/rfc2392
+        """
+        if self.include_references:
+            cid = _email.get_id()
+            link = 'cid:{}'.format(_urllib_parse.quote(cid[1:-1]))
+            _LOG.critical(link)
+            part = _MIMENoneMultipart('image', 'png')
+            part.add_content(b'AAA')
+        else:
+            link = url
+            part = None
+        _LOG.critical((link, part))
+        return (link, part)
 
     def _send(self, sender, message):
         _LOG.info('send message for {}'.format(self))

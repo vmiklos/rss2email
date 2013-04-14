@@ -98,6 +98,9 @@ CONFIG['DEFAULT'] = _collections.OrderedDict((
         # characters, we iterate through the list below and use the
         # first character set that works.
         ('encodings', 'US-ASCII, ISO-8859-1, UTF-8, BIG5, ISO-2022-JP'),
+        # True: Use RFC 2392's cid: to include and link referenced data.
+        # False: Only include the converted entry, not its references.
+        ('include-references', str(False)),
         ## HTML conversion
         # True: Send text/html messages when possible.
         # False: Convert HTML to plain text.

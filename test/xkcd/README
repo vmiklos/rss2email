@@ -1,0 +1,22 @@
+feed.atom is a snapshot of
+
+  http://xkcd.com/atom.xml
+
+as of 2013-04-14.
+
+HTTP headers:
+
+  HTTP/1.1 200 OK
+  Vary: Accept-Encoding
+  Content-Type: application/xml
+  Accept-Ranges: bytes
+  ETag: "3353825625"
+  Last-Modified: Fri, 12 Apr 2013 04:00:05 GMT
+  Content-Length: 2498
+  Date: Sun, 14 Apr 2013 12:49:47 GMT
+  Server: lighttpd/1.4.28
+
+The URLs referenced from the entries were downloaded on the same day
+and stored with filenames matching their URL
+(e.g. `http://imgs.xkcd.com/comics/geologist.png` is stored as
+`imgs.xkcd.com/comics/geologist.png`).
