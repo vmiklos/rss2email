@@ -130,19 +130,49 @@ def set_headers(message, sender, recipient, subject, extra_headers=None,
             encoding = guess_encoding(value, encodings)
             message[key] = _Header(value, encoding)
 
+def get_mimetext(body, content_type='plain', config=None, section='DEFAULT'):
+    """Generate a text/* `Message` instance.
+
+    All arguments should be Unicode strings (plain ASCII works as
+    well).
+
+    The email will be properly MIME encoded.
+
+    The message charset will be the first one out of the configured
+    list of encodings that can represent all the characters occurring
+    in the body.
+
+    >>> message = get_mimetext(
+    ...     body='Hello, world!\\n',
+    ...     content_type='plain')
+    >>> print(message.as_string())  # doctest: +REPORT_UDIFF
+    MIME-Version: 1.0
+    Content-Type: text/plain; charset="us-ascii"
+    Content-Transfer-Encoding: 7bit
+    <BLANKLINE>
+    Hello, world!
+    <BLANKLINE>
+    """
+    _config = _get_config(config=config, section=section)
+    encodings = _get_encodings(config=config, section=section)
+
+    body_encoding = guess_encoding(body, encodings)
+
+    # Create the message ('plain' stands for Content-Type: text/plain)
+    message = _MIMEText(body, content_type, body_encoding)
+    if _config.getboolean('use-8bit'):
+        del message['Content-Transfer-Encoding']
+        charset = _Charset(body_encoding)
+        charset.body_encoding = _email_encoders.encode_7or8bit
+        message.set_payload(body, charset=charset)
+    return message
+
 def get_message(sender, recipient, subject, body, content_type,
                 extra_headers=None, config=None, section='DEFAULT'):
     """Generate a `Message` instance.
 
-    All arguments should be Unicode strings (plain ASCII works as well).
-
-    Only the real name part of sender and recipient addresses may contain
-    non-ASCII characters.
-
-    The email will be properly MIME encoded.
-
-    The charset of the email will be the first one out of the list
-    that can represent all the characters occurring in the email.
+    This is a convenient wrapper around `get_mimetext()` and
+    `set_headers()`.
 
     >>> message = get_message(
     ...     sender='John <jdoe@a.com>', recipient='Ζεύς <z@olympus.org>',
@@ -162,18 +192,8 @@ def get_message(sender, recipient, subject, body, content_type,
     Hello, world!
     <BLANKLINE>
     """
-    _config = _get_config(config=config, section=section)
-    encodings = _get_encodings(config=config, section=section)
-
-    body_encoding = guess_encoding(body, encodings)
-
-    # Create the message ('plain' stands for Content-Type: text/plain)
-    message = _MIMEText(body, content_type, body_encoding)
-    if _config.getboolean('use-8bit'):
-        del message['Content-Transfer-Encoding']
-        charset = _Charset(body_encoding)
-        charset.body_encoding = _email_encoders.encode_7or8bit
-        message.set_payload(body, charset=charset)
+    message = get_mimetext(
+        body=body, content_type=content_type, config=config, section=section)
     set_headers(
         message=message, sender=sender, recipient=recipient, subject=subject,
         extra_headers=extra_headers, config=config, section=section)
