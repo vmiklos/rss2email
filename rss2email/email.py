@@ -59,6 +59,17 @@ def guess_encoding(string, encodings=('US-ASCII', 'UTF-8')):
             return encoding
     raise _error.NoValidEncodingError(string=string, encodings=encodings)
 
+def _get_config(config=None, section='DEFAULT'):
+    if config is None:
+        config = _config.CONFIG
+    if section not in config.sections():
+        section = 'DEFAULT'
+    return config[section]
+
+def _get_encodings(config=None, section='DEFAULT'):
+    config = _get_config(config=config, section=section)
+    return [x.strip() for x in config['encodings'].split(',')]
+
 def address_header(address, config=None, section='DEFAULT'):
     """Convert a Unicode address to an email header
 
@@ -70,12 +81,7 @@ def address_header(address, config=None, section='DEFAULT'):
     >>> address_header('Ζεύς <z@olympus.org>')
     '=?utf-8?b?zpbOtc+Nz4I=?= <z@olympus.org>'
     """
-    if config is None:
-        config = _config.CONFIG
-    if section not in config.sections():
-        section = 'DEFAULT'
-    encodings = [
-        x.strip() for x in config.get(section, 'encodings').split(',')]
+    encodings = _get_encodings(config=config, section=section)
 
     # Split real name (which is optional) and email address parts
     name,addr = _parseaddr(address)
@@ -89,6 +95,40 @@ def address_header(address, config=None, section='DEFAULT'):
     addr.encode('ascii')
 
     return _formataddr((name, addr))
+
+def set_headers(message, sender, recipient, subject, extra_headers=None,
+                config=None, section='DEFAULT'):
+    """Set the usual message headers
+
+    >>> message = _MIMEText('Hello, world!\\n', 'plain', 'US-ASCII')
+    >>> set_headers(
+    ...     message=message,
+    ...     sender='John <jdoe@a.com>',
+    ...     recipient='Ζεύς <z@olympus.org>',
+    ...     subject='Testing',
+    ...     extra_headers={'Approved': 'joe@bob.org'})
+    >>> print(message.as_string())  # doctest: +REPORT_UDIFF
+    MIME-Version: 1.0
+    Content-Type: text/plain; charset="us-ascii"
+    Content-Transfer-Encoding: 7bit
+    From: John <jdoe@a.com>
+    To: =?utf-8?b?zpbOtc+Nz4I=?= <z@olympus.org>
+    Subject: Testing
+    Approved: joe@bob.org
+    <BLANKLINE>
+    Hello, world!
+    <BLANKLINE>
+    """
+    encodings = _get_encodings(config=config, section=section)
+
+    subject_encoding = guess_encoding(subject, encodings)
+    message['From'] = address_header(sender)
+    message['To'] = address_header(recipient)
+    message['Subject'] = _Header(subject, subject_encoding)
+    if extra_headers:
+        for key,value in extra_headers.items():
+            encoding = guess_encoding(value, encodings)
+            message[key] = _Header(value, encoding)
 
 def get_message(sender, recipient, subject, body, content_type,
                 extra_headers=None, config=None, section='DEFAULT'):
@@ -122,30 +162,21 @@ def get_message(sender, recipient, subject, body, content_type,
     Hello, world!
     <BLANKLINE>
     """
-    if config is None:
-        config = _config.CONFIG
-    if section not in config.sections():
-        section = 'DEFAULT'
-    encodings = [
-        x.strip() for x in config.get(section, 'encodings').split(',')]
+    _config = _get_config(config=config, section=section)
+    encodings = _get_encodings(config=config, section=section)
 
-    subject_encoding = guess_encoding(subject, encodings)
     body_encoding = guess_encoding(body, encodings)
 
     # Create the message ('plain' stands for Content-Type: text/plain)
     message = _MIMEText(body, content_type, body_encoding)
-    message['From'] = address_header(sender)
-    message['To'] = address_header(recipient)
-    message['Subject'] = _Header(subject, subject_encoding)
-    if config.getboolean(section, 'use-8bit'):
+    if _config.getboolean('use-8bit'):
         del message['Content-Transfer-Encoding']
         charset = _Charset(body_encoding)
         charset.body_encoding = _email_encoders.encode_7or8bit
         message.set_payload(body, charset=charset)
-    if extra_headers:
-        for key,value in extra_headers.items():
-            encoding = guess_encoding(value, encodings)
-            message[key] = _Header(value, encoding)
+    set_headers(
+        message=message, sender=sender, recipient=recipient, subject=subject,
+        extra_headers=extra_headers, config=config, section=section)
     return message
 
 def smtp_send(sender, recipient, message, config=None, section='DEFAULT'):
@@ -245,10 +276,10 @@ def _flatten(message):
     ...     print(line)  # doctest: +REPORT_UDIFF
     b'MIME-Version: 1.0'
     b'Content-Type: text/plain; charset="utf-8"'
+    b'Content-Transfer-Encoding: 8bit'
     b'From: John <jdoe@a.com>'
     b'To: =?utf-8?b?zpbOtc+Nz4I=?= <z@olympus.org>'
     b'Subject: Homage'
-    b'Content-Transfer-Encoding: 8bit'
     b''
     b"You're great, \xce\x96\xce\xb5\xcf\x8d\xcf\x82!"
     b''
