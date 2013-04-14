@@ -32,6 +32,7 @@ import io as _io
 import smtplib as _smtplib
 import subprocess as _subprocess
 import sys as _sys
+import uuid as _uuid
 
 from . import LOG as _LOG
 from . import config as _config
@@ -129,6 +130,15 @@ def set_headers(message, sender, recipient, subject, extra_headers=None,
         for key,value in extra_headers.items():
             encoding = guess_encoding(value, encodings)
             message[key] = _Header(value, encoding)
+
+def get_id():
+    """Return a random, universally unique ID
+
+    Conforming to RFC 2822 [1].
+
+    [1]: http://tools.ietf.org/html/rfc2822#section-3.6
+    """
+    return '<{}@dev.null.invalid>'.format(_uuid.uuid4())
 
 def get_mimetext(body, content_type='plain', config=None, section='DEFAULT'):
     """Generate a text/* `Message` instance.

@@ -36,7 +36,6 @@ import socket as _socket
 import time as _time
 import urllib.error as _urllib_error
 import urllib.request as _urllib_request
-import uuid as _uuid
 import xml.sax as _sax
 import xml.sax.saxutils as _saxutils
 
@@ -408,7 +407,7 @@ class Feed (object):
         subject = self._get_entry_title(entry)
         extra_headers = _collections.OrderedDict((
                 ('Date', self._get_entry_date(entry)),
-                ('Message-ID', '<{}@dev.null.invalid>'.format(_uuid.uuid4())),
+                ('Message-ID', _email.get_id()),
                 ('User-Agent', 'rss2email'),
                 ('X-RSS-Feed', self.url),
                 ('X-RSS-ID', id_),
